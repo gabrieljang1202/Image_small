@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>이미지 압축기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+KR:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f7f7f5; --surface: #ffffff; --surface2: #efeee9;
+  --border: #e2e0da; --accent: #5b8a3a; --accent-dim: rgba(91,138,58,0.10);
+  --text: #1c1c1a; --muted: #8a8780; --danger: #d6453d; --success: #2e9e63;
+  --mono: 'DM Mono', monospace; --sans: 'Noto Sans KR', sans-serif;
+}
+body { background:var(--bg); color:var(--text); font-family:var(--sans); font-weight:300; min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:48px 20px 80px; }
+header { width:100%; max-width:900px; margin-bottom:36px; display:flex; align-items:baseline; gap:16px; }
+header h1 { font-family:var(--mono); font-size:22px; font-weight:500; letter-spacing:-0.5px; color:var(--accent); }
+header span { font-size:12px; color:var(--muted); font-family:var(--mono); }
+.main { width:100%; max-width:900px; display:flex; flex-direction:column; gap:20px; }
+
+/* Tabs */
+.tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); padding-bottom:0; }
+.tab-btn { padding:10px 20px; background:transparent; border:none; border-bottom:2px solid transparent; color:var(--muted); font-family:var(--mono); font-size:13px; cursor:pointer; margin-bottom:-1px; transition:all 0.15s; }
+.tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+.tab-btn:hover:not(.active) { color:var(--text); }
+.tab-pane { display:none; flex-direction:column; gap:20px; }
+.tab-pane.active { display:flex; }
+
+/* Dropzone */
+.dropzone { border:1.5px dashed var(--border); border-radius:12px; background:var(--surface); padding:52px 32px; text-align:center; cursor:pointer; transition:border-color 0.2s,background 0.2s; position:relative; }
+.dropzone.drag-over { border-color:var(--accent); background:var(--accent-dim); }
+.dropzone input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+.dropzone svg { display:block; margin:0 auto 16px; opacity:0.35; }
+.dropzone p { font-size:14px; color:var(--muted); line-height:1.8; }
+.dropzone p strong { color:var(--text); font-weight:500; }
+.dropzone .supported { font-family:var(--mono); font-size:11px; margin-top:8px; color:#b5b2aa; }
+
+/* Controls */
+.controls { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:22px 28px; display:none; flex-direction:column; gap:18px; }
+.controls.visible { display:flex; }
+.control-row { display:flex; align-items:center; gap:20px; }
+.control-label { font-family:var(--mono); font-size:12px; color:var(--muted); white-space:nowrap; width:108px; flex-shrink:0; }
+.slider-wrap { flex:1; display:flex; align-items:center; gap:12px; }
+input[type="range"] { flex:1; -webkit-appearance:none; appearance:none; height:3px; background:var(--border); border-radius:2px; outline:none; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--accent); cursor:pointer; border:2px solid var(--bg); box-shadow:0 0 0 1px var(--accent); }
+input[type="range"]::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:var(--accent); cursor:pointer; border:2px solid var(--bg); }
+.slider-val { font-family:var(--mono); font-size:14px; font-weight:500; color:var(--accent); width:42px; text-align:right; }
+.format-btns { display:flex; gap:8px; flex-wrap:wrap; }
+.fmt-btn { padding:6px 14px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--muted); font-family:var(--mono); font-size:12px; cursor:pointer; transition:all 0.15s; }
+.fmt-btn.active { background:var(--accent-dim); border-color:var(--accent); color:var(--accent); }
+.fmt-btn:hover:not(.active) { border-color:#b5b2aa; color:var(--text); }
+
+/* Help text */
+.help-text { background:var(--surface2); border-radius:8px; padding:14px 16px; display:flex; flex-direction:column; gap:8px; }
+.help-text p { font-size:12px; line-height:1.7; color:var(--muted); }
+.help-text p strong { color:var(--text); font-weight:500; }
+.accent-text { color:var(--accent); font-weight:500; }
+.estimate-line { font-family:var(--mono); font-size:12px; color:var(--text); }
+.estimate-line strong { color:var(--accent); }
+
+/* Single preview */
+.preview-panel { display:none; gap:16px; }
+.preview-panel.visible { display:grid; grid-template-columns:1fr 1fr; }
+@media(max-width:600px){ .preview-panel.visible { grid-template-columns:1fr; } }
+.preview-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+.preview-card-header { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+.preview-card-header span { font-family:var(--mono); font-size:11px; color:var(--muted); }
+.size-tag { font-size:12px; font-weight:500; padding:2px 8px; border-radius:4px; background:var(--surface2); color:var(--text); font-family:var(--mono); }
+.size-tag.reduced { background:var(--accent-dim); color:var(--accent); }
+.preview-img-wrap { width:100%; aspect-ratio:4/3; background:var(--surface2); display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.preview-img-wrap img { max-width:100%; max-height:100%; object-fit:contain; display:block; }
+
+/* Action bar */
+.action-bar { display:none; gap:12px; align-items:center; flex-wrap:wrap; }
+.action-bar.visible { display:flex; }
+.btn-primary { padding:12px 28px; background:var(--accent); color:#ffffff; font-family:var(--mono); font-size:13px; font-weight:500; border:none; border-radius:8px; cursor:pointer; transition:opacity 0.15s,transform 0.1s; display:inline-flex; align-items:center; gap:8px; }
+.btn-primary:hover { opacity:0.88; } .btn-primary:active { transform:scale(0.98); } .btn-primary:disabled { opacity:0.35; cursor:not-allowed; }
+.btn-outline { padding:12px 28px; background:transparent; color:var(--accent); font-family:var(--mono); font-size:13px; border:1px solid var(--accent); border-radius:8px; cursor:pointer; transition:background 0.15s; display:inline-flex; align-items:center; gap:8px; text-decoration:none; }
+.btn-outline:hover { background:var(--accent-dim); }
+.btn-ghost { padding:12px 16px; background:transparent; color:var(--muted); font-family:var(--mono); font-size:12px; border:1px solid var(--border); border-radius:8px; cursor:pointer; transition:color 0.15s,border-color 0.15s; }
+.btn-ghost:hover { color:var(--danger); border-color:var(--danger); }
+.ratio-badge { font-family:var(--mono); font-size:12px; color:var(--muted); margin-left:auto; }
+.ratio-badge .ratio-val { color:var(--accent); font-weight:500; }
+.spinner { display:none; width:14px; height:14px; border:2px solid rgba(255,255,255,0.35); border-top-color:#ffffff; border-radius:50%; animation:spin 0.6s linear infinite; flex-shrink:0; }
+.spinner.visible { display:block; }
+.spinner-light { display:none; width:14px; height:14px; border:2px solid rgba(91,138,58,0.2); border-top-color:var(--accent); border-radius:50%; animation:spin 0.6s linear infinite; flex-shrink:0; }
+.spinner-light.visible { display:block; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* Batch file list */
+.batch-summary { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 18px; display:none; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+.batch-summary.visible { display:flex; }
+.batch-summary-text { font-family:var(--mono); font-size:12px; color:var(--muted); }
+.batch-summary-text strong { color:var(--text); font-weight:500; }
+
+/* Progress bar */
+.progress-wrap { display:none; flex-direction:column; gap:8px; }
+.progress-wrap.visible { display:flex; }
+.progress-track { width:100%; height:6px; background:var(--border); border-radius:3px; overflow:hidden; }
+.progress-fill { height:100%; width:0%; background:var(--accent); border-radius:3px; transition:width 0.15s; }
+.progress-label { font-family:var(--mono); font-size:11px; color:var(--muted); display:flex; justify-content:space-between; }
+
+/* Batch result list */
+.result-list-wrap { display:none; flex-direction:column; gap:10px; }
+.result-list-wrap.visible { display:flex; }
+.result-list-header { display:flex; align-items:center; justify-content:space-between; }
+.result-list-header span { font-family:var(--mono); font-size:11px; color:var(--muted); }
+.result-list { display:flex; flex-direction:column; gap:2px; max-height:340px; overflow-y:auto; border:1px solid var(--border); border-radius:10px; }
+.result-list::-webkit-scrollbar { width:4px; } .result-list::-webkit-scrollbar-track { background:transparent; } .result-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.result-row { display:grid; grid-template-columns:1fr auto auto auto; align-items:center; gap:12px; padding:10px 14px; border-bottom:1px solid var(--border); font-family:var(--mono); font-size:12px; }
+.result-row:last-child { border-bottom:none; }
+.result-row.processing { opacity:0.5; }
+.result-row.done { }
+.result-row.error { }
+.result-name { color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
+.result-orig { color:var(--muted); font-size:11px; white-space:nowrap; }
+.result-comp { font-size:11px; white-space:nowrap; }
+.result-ratio { font-size:11px; white-space:nowrap; padding:1px 7px; border-radius:4px; }
+.result-ratio.down { background:var(--accent-dim); color:var(--accent); }
+.result-ratio.up { background:rgba(255,92,92,0.1); color:var(--danger); }
+.result-ratio.pending { color:var(--muted); }
+.result-dl { background:transparent; border:none; color:var(--muted); cursor:pointer; padding:2px 4px; border-radius:4px; transition:color 0.15s; font-size:11px; font-family:var(--mono); }
+.result-dl:hover { color:var(--accent); }
+.result-dl:disabled { opacity:0.3; cursor:default; }
+
+/* download all bar */
+.dl-all-bar { display:none; gap:12px; align-items:center; }
+.dl-all-bar.visible { display:flex; }
+.total-saved { font-family:var(--mono); font-size:12px; color:var(--muted); margin-left:auto; }
+.total-saved strong { color:var(--accent); }
+
+footer { margin-top:60px; font-family:var(--mono); font-size:11px; color:#c8c5bd; text-align:center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>img-compress</h1>
+  <span>// 브라우저 기반 이미지 압축기</span>
+</header>
+
+<div class="main">
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="single">단일 파일</button>
+    <button class="tab-btn" data-tab="batch">일괄 처리</button>
+  </div>
+
+  <!-- ───── 단일 탭 ───── -->
+  <div class="tab-pane active" id="tab-single">
+    <div class="dropzone" id="dropzoneSingle">
+      <input type="file" id="fileInputSingle" accept="image/*">
+      <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#aaa6a0" stroke-width="1.5">
+        <rect x="4" y="8" width="32" height="26" rx="3"/>
+        <circle cx="14" cy="18" r="3"/>
+        <path d="M4 28l8-8 6 6 5-5 9 9"/>
+        <path d="M27 4v8M24 7l3-3 3 3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <p><strong>이미지를 끌어다 놓거나 클릭해서 선택</strong></p>
+      <p class="supported">JPG · PNG · WebP · GIF · BMP</p>
+    </div>
+
+    <div class="controls" id="controlsSingle">
+      <div class="control-row">
+        <span class="control-label">출력 형식</span>
+        <div class="format-btns" id="fmtSingle">
+          <button class="fmt-btn active" data-fmt="image/jpeg">JPEG</button>
+          <button class="fmt-btn" data-fmt="image/webp">WebP</button>
+          <button class="fmt-btn" data-fmt="image/png">PNG</button>
+        </div>
+      </div>
+      <div class="control-row" id="qualRowS">
+        <span class="control-label">품질</span>
+        <div class="slider-wrap">
+          <input type="range" id="qualSliderS" min="1" max="100" value="75">
+          <span class="slider-val" id="qualValS">75</span>
+        </div>
+      </div>
+      <div class="control-row">
+        <span class="control-label">최대 너비(px)</span>
+        <div class="slider-wrap">
+          <input type="range" id="maxWS" min="200" max="4000" step="100" value="4000">
+          <span class="slider-val" id="maxWValS">원본</span>
+        </div>
+      </div>
+      <div class="help-text">
+        <p><strong>품질이란?</strong> JPEG/WebP는 압축 시 원본 화질의 몇 %를 유지할지를 의미합니다. 100에 가까울수록 원본과 거의 차이가 없지만 용량이 커지고, 낮을수록 용량은 줄지만 화질 저하가 보입니다. <span class="accent-text">70~85</span> 구간이 화질과 용량의 균형이 가장 좋습니다. (PNG는 무손실 형식이라 품질 값이 적용되지 않습니다.)</p>
+        <p><strong>최대 너비란?</strong> 이미지의 가로 픽셀 수를 제한합니다. 화면이나 웹 용도라면 <span class="accent-text">1600~2000px</span> 정도로 줄여도 눈에 띄는 차이가 거의 없고 용량은 크게 줄어듭니다. 인쇄용이거나 확대해서 볼 사진이라면 원본 그대로 두는 것을 권장합니다.</p>
+        <p class="estimate-line">예상 용량: <span id="estSizeS">—</span></p>
+      </div>
+    </div>
+
+    <div class="action-bar" id="actionBarS">
+      <button class="btn-primary" id="compressBtnS">
+        <span class="spinner" id="spinnerS"></span>
+        <span id="compTextS">압축하기</span>
+      </button>
+      <a class="btn-outline" id="dlBtnS" style="display:none" download>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 2v7M4 6.5 7 9.5 10 6.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 11h10" stroke-linecap="round"/></svg>
+        다운로드
+      </a>
+      <button class="btn-ghost" id="resetBtnS">초기화</button>
+      <span class="ratio-badge" id="ratioBadgeS"></span>
+    </div>
+
+    <div class="preview-panel" id="previewPanelS">
+      <div class="preview-card">
+        <div class="preview-card-header"><span>원본</span><span class="size-tag" id="origTagS">—</span></div>
+        <div class="preview-img-wrap"><img id="origImgS" src="" alt="원본"></div>
+      </div>
+      <div class="preview-card">
+        <div class="preview-card-header"><span>압축 결과</span><span class="size-tag reduced" id="compTagS">—</span></div>
+        <div class="preview-img-wrap"><img id="compImgS" src="" alt="결과"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───── 일괄 탭 ───── -->
+  <div class="tab-pane" id="tab-batch">
+    <div class="dropzone" id="dropzoneBatch">
+      <input type="file" id="fileInputBatch" accept="image/*" multiple>
+      <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#aaa6a0" stroke-width="1.5">
+        <rect x="2" y="12" width="28" height="22" rx="3"/>
+        <rect x="8" y="6" width="28" height="22" rx="3" fill="var(--bg)"/>
+        <rect x="8" y="6" width="28" height="22" rx="3"/>
+        <path d="M22 14v8M19 19l3 3 3-3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <p><strong>이미지 여러 장을 한꺼번에 끌어다 놓거나 클릭해서 선택</strong></p>
+      <p>60장 이상도 처리 가능</p>
+      <p class="supported">JPG · PNG · WebP · GIF · BMP</p>
+    </div>
+
+    <div class="controls" id="controlsBatch">
+      <div class="control-row">
+        <span class="control-label">출력 형식</span>
+        <div class="format-btns" id="fmtBatch">
+          <button class="fmt-btn active" data-fmt="image/jpeg">JPEG</button>
+          <button class="fmt-btn" data-fmt="image/webp">WebP</button>
+          <button class="fmt-btn" data-fmt="image/png">PNG</button>
+        </div>
+      </div>
+      <div class="control-row" id="qualRowB">
+        <span class="control-label">품질</span>
+        <div class="slider-wrap">
+          <input type="range" id="qualSliderB" min="1" max="100" value="75">
+          <span class="slider-val" id="qualValB">75</span>
+        </div>
+      </div>
+      <div class="control-row">
+        <span class="control-label">최대 너비(px)</span>
+        <div class="slider-wrap">
+          <input type="range" id="maxWB" min="200" max="4000" step="100" value="4000">
+          <span class="slider-val" id="maxWValB">원본</span>
+        </div>
+      </div>
+      <div class="help-text">
+        <p><strong>품질이란?</strong> JPEG/WebP는 압축 시 원본 화질의 몇 %를 유지할지를 의미합니다. 100에 가까울수록 원본과 거의 차이가 없지만 용량이 커지고, 낮을수록 용량은 줄지만 화질 저하가 보입니다. <span class="accent-text">70~85</span> 구간이 화질과 용량의 균형이 가장 좋습니다. (PNG는 무손실 형식이라 품질 값이 적용되지 않습니다.)</p>
+        <p><strong>최대 너비란?</strong> 이미지의 가로 픽셀 수를 제한합니다. 화면이나 웹 용도라면 <span class="accent-text">1600~2000px</span> 정도로 줄여도 눈에 띄는 차이가 거의 없고 용량은 크게 줄어듭니다. 인쇄용이거나 확대해서 볼 사진이라면 원본 그대로 두는 것을 권장합니다.</p>
+        <p class="estimate-line">선택한 파일들의 예상 평균 절감률을 기준으로 계산됩니다 (압축 시작 시 실제 값으로 갱신).</p>
+      </div>
+    </div>
+
+    <div class="batch-summary" id="batchSummary">
+      <span class="batch-summary-text">선택된 파일: <strong id="batchCount">0</strong>장 · 합계 <strong id="batchTotalSize">0 KB</strong></span>
+      <button class="btn-ghost" id="resetBtnB" style="padding:6px 12px;font-size:11px;">초기화</button>
+    </div>
+
+    <div class="action-bar" id="actionBarB">
+      <button class="btn-primary" id="compressBtnB">
+        <span class="spinner" id="spinnerB"></span>
+        <span id="compTextB">일괄 압축 시작</span>
+      </button>
+    </div>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-label">
+        <span id="progressText">처리 중...</span>
+        <span id="progressPct">0%</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+
+    <div class="result-list-wrap" id="resultListWrap">
+      <div class="result-list-header">
+        <span id="resultCountLabel">결과</span>
+      </div>
+      <div class="result-list" id="resultList"></div>
+    </div>
+
+    <div class="dl-all-bar" id="dlAllBar">
+      <button class="btn-primary" id="dlAllBtn">
+        <span class="spinner-light" id="spinnerZip"></span>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 2v7M4 6.5 7 9.5 10 6.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 11h10" stroke-linecap="round"/></svg>
+        <span id="dlAllText">전체 ZIP 다운로드</span>
+      </button>
+      <button class="btn-ghost" id="resetBtnB2">초기화</button>
+      <span class="total-saved" id="totalSaved"></span>
+    </div>
+  </div>
+</div>
+
+<footer>gabrieljang1202 · MIT License</footer>
+<canvas id="canvas" style="display:none"></canvas>
+
+<script>
+/* ─── Shared ─── */
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const fmtExt = { 'image/jpeg':'jpg', 'image/webp':'webp', 'image/png':'png' };
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(2) + ' MB';
+}
+function compressImage(file, format, quality, maxW) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (maxW < 4000 && w > maxW) { h = Math.round(h*(maxW/w)); w = maxW; }
+      canvas.width = w; canvas.height = h;
+      ctx.clearRect(0,0,w,h);
+      ctx.drawImage(img,0,0,w,h);
+      const q = format === 'image/png' ? undefined : quality/100;
+      const dataURL = canvas.toDataURL(format, q);
+      URL.revokeObjectURL(url);
+      resolve(dataURL);
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+function dataURLtoBlob(dataURL) {
+  const [header, data] = dataURL.split(',');
+  const mime = header.match(/:(.*?);/)[1];
+  const bin = atob(data);
+  const arr = new Uint8Array(bin.length);
+  for (let i=0; i<bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], {type: mime});
+}
+function dataURLBytes(dataURL) { return atob(dataURL.split(',')[1]).length; }
+
+/* ─── Tabs ─── */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+/* ─── Format btn helpers ─── */
+function bindFormatBtns(groupId, onChange) {
+  document.querySelectorAll(`#${groupId} .fmt-btn`).forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll(`#${groupId} .fmt-btn`).forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      onChange(btn.dataset.fmt);
+    });
+  });
+}
+
+/* ═══════════════════════════════
+   SINGLE MODE
+═══════════════════════════════ */
+let singleFile = null, singleFmt = 'image/jpeg';
+const dzS = document.getElementById('dropzoneSingle');
+const fiS = document.getElementById('fileInputSingle');
+const ctrlS = document.getElementById('controlsSingle');
+const abS = document.getElementById('actionBarS');
+const ppS = document.getElementById('previewPanelS');
+const compBtnS = document.getElementById('compressBtnS');
+const spinnerS = document.getElementById('spinnerS');
+const compTextS = document.getElementById('compTextS');
+const dlBtnS = document.getElementById('dlBtnS');
+const resetBtnS = document.getElementById('resetBtnS');
+const ratioBadgeS = document.getElementById('ratioBadgeS');
+const origImgS = document.getElementById('origImgS');
+const compImgS = document.getElementById('compImgS');
+const origTagS = document.getElementById('origTagS');
+const compTagS = document.getElementById('compTagS');
+const qualSliderS = document.getElementById('qualSliderS');
+const qualValS = document.getElementById('qualValS');
+const maxWS = document.getElementById('maxWS');
+const maxWValS = document.getElementById('maxWValS');
+const estSizeS = document.getElementById('estSizeS');
+let estTimerS = null;
+
+bindFormatBtns('fmtSingle', fmt => {
+  singleFmt = fmt;
+  document.getElementById('qualRowS').style.opacity = fmt==='image/png'?'0.3':'1';
+  document.getElementById('qualRowS').style.pointerEvents = fmt==='image/png'?'none':'auto';
+  updateEstimateS();
+});
+qualSliderS.addEventListener('input', () => { qualValS.textContent = qualSliderS.value; updateEstimateS(); });
+maxWS.addEventListener('input', () => { maxWValS.textContent = parseInt(maxWS.value)>=4000?'원본':maxWS.value+'px'; updateEstimateS(); });
+
+function updateEstimateS() {
+  if (!singleFile) { estSizeS.textContent = '—'; return; }
+  clearTimeout(estTimerS);
+  estSizeS.textContent = '계산 중...';
+  estTimerS = setTimeout(async () => {
+    try {
+      const dataURL = await compressImage(singleFile, singleFmt, parseInt(qualSliderS.value), parseInt(maxWS.value));
+      const eb = dataURLBytes(dataURL), ob = singleFile.size;
+      const ratio = ((1-eb/ob)*100).toFixed(1);
+      const ratioHtml = eb < ob
+        ? `<strong>−${ratio}%</strong>`
+        : `<span style="color:var(--danger)">+${Math.abs(ratio)}%</span>`;
+      estSizeS.innerHTML = `약 ${fmtBytes(eb)} (${ratioHtml})`;
+    } catch(e) {
+      estSizeS.textContent = '—';
+    }
+  }, 250);
+}
+
+function loadSingleFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  singleFile = file;
+  origImgS.src = URL.createObjectURL(file);
+  compImgS.src = ''; compTagS.textContent = '—';
+  origTagS.textContent = fmtBytes(file.size);
+  dlBtnS.style.display = 'none'; ratioBadgeS.innerHTML = '';
+  ctrlS.classList.add('visible'); abS.classList.add('visible'); ppS.classList.add('visible');
+  compTextS.textContent = '압축하기';
+  updateEstimateS();
+}
+
+dzS.addEventListener('dragover', e => { e.preventDefault(); dzS.classList.add('drag-over'); });
+dzS.addEventListener('dragleave', () => dzS.classList.remove('drag-over'));
+dzS.addEventListener('drop', e => { e.preventDefault(); dzS.classList.remove('drag-over'); loadSingleFile(e.dataTransfer.files[0]); });
+fiS.addEventListener('change', () => loadSingleFile(fiS.files[0]));
+
+compBtnS.addEventListener('click', async () => {
+  if (!singleFile) return;
+  compBtnS.disabled = true; spinnerS.classList.add('visible'); compTextS.textContent = '처리 중...';
+  try {
+    const dataURL = await compressImage(singleFile, singleFmt, parseInt(qualSliderS.value), parseInt(maxWS.value));
+    compImgS.src = dataURL;
+    const cb = dataURLBytes(dataURL), ob = singleFile.size;
+    const ratio = ((1-cb/ob)*100).toFixed(1);
+    compTagS.textContent = fmtBytes(cb);
+    origTagS.textContent = fmtBytes(ob);
+    ratioBadgeS.innerHTML = cb < ob
+      ? `<span class="ratio-val">−${ratio}%</span> 감소`
+      : `<span style="color:var(--danger)">+${Math.abs(ratio)}%</span> 증가`;
+    const baseName = singleFile.name.replace(/\.[^.]+$/,'');
+    dlBtnS.href = dataURL;
+    dlBtnS.download = `${baseName}_compressed.${fmtExt[singleFmt]}`;
+    dlBtnS.style.display = 'inline-flex';
+    compTextS.textContent = '다시 압축';
+  } finally {
+    compBtnS.disabled = false; spinnerS.classList.remove('visible');
+  }
+});
+
+resetBtnS.addEventListener('click', () => {
+  singleFile = null; fiS.value = '';
+  ctrlS.classList.remove('visible'); abS.classList.remove('visible'); ppS.classList.remove('visible');
+  dlBtnS.style.display='none'; ratioBadgeS.innerHTML='';
+  origImgS.src=''; compImgS.src=''; compTextS.textContent='압축하기';
+  qualSliderS.value=75; qualValS.textContent='75';
+  maxWS.value=4000; maxWValS.textContent='원본';
+  document.querySelectorAll('#fmtSingle .fmt-btn').forEach((b,i)=>b.classList.toggle('active',i===0));
+  singleFmt='image/jpeg';
+  estSizeS.textContent = '—';
+});
+
+/* ═══════════════════════════════
+   BATCH MODE
+═══════════════════════════════ */
+let batchFiles = [], batchFmt = 'image/jpeg', batchResults = [];
+const dzB = document.getElementById('dropzoneBatch');
+const fiB = document.getElementById('fileInputBatch');
+const ctrlB = document.getElementById('controlsBatch');
+const summaryB = document.getElementById('batchSummary');
+const abB = document.getElementById('actionBarB');
+const compBtnB = document.getElementById('compressBtnB');
+const spinnerB = document.getElementById('spinnerB');
+const compTextB = document.getElementById('compTextB');
+const progressWrap = document.getElementById('progressWrap');
+const progressFill = document.getElementById('progressFill');
+const progressText = document.getElementById('progressText');
+const progressPct = document.getElementById('progressPct');
+const resultListWrap = document.getElementById('resultListWrap');
+const resultList = document.getElementById('resultList');
+const resultCountLabel = document.getElementById('resultCountLabel');
+const dlAllBar = document.getElementById('dlAllBar');
+const dlAllBtn = document.getElementById('dlAllBtn');
+const dlAllText = document.getElementById('dlAllText');
+const spinnerZip = document.getElementById('spinnerZip');
+const totalSaved = document.getElementById('totalSaved');
+const batchCountEl = document.getElementById('batchCount');
+const batchTotalEl = document.getElementById('batchTotalSize');
+const qualSliderB = document.getElementById('qualSliderB');
+const qualValB = document.getElementById('qualValB');
+const maxWB = document.getElementById('maxWB');
+const maxWValB = document.getElementById('maxWValB');
+
+bindFormatBtns('fmtBatch', fmt => {
+  batchFmt = fmt;
+  document.getElementById('qualRowB').style.opacity = fmt==='image/png'?'0.3':'1';
+  document.getElementById('qualRowB').style.pointerEvents = fmt==='image/png'?'none':'auto';
+});
+qualSliderB.addEventListener('input', () => qualValB.textContent = qualSliderB.value);
+maxWB.addEventListener('input', () => maxWValB.textContent = parseInt(maxWB.value)>=4000?'원본':maxWB.value+'px');
+
+function loadBatchFiles(files) {
+  const imgs = Array.from(files).filter(f => f.type.startsWith('image/'));
+  if (!imgs.length) return;
+  batchFiles = imgs;
+  batchResults = [];
+  const totalBytes = imgs.reduce((s,f)=>s+f.size,0);
+  batchCountEl.textContent = imgs.length;
+  batchTotalEl.textContent = fmtBytes(totalBytes);
+  summaryB.classList.add('visible');
+  ctrlB.classList.add('visible');
+  abB.classList.add('visible');
+  resultListWrap.classList.remove('visible');
+  progressWrap.classList.remove('visible');
+  dlAllBar.classList.remove('visible');
+  resultList.innerHTML = '';
+  compTextB.textContent = `일괄 압축 시작 (${imgs.length}장)`;
+}
+
+dzB.addEventListener('dragover', e => { e.preventDefault(); dzB.classList.add('drag-over'); });
+dzB.addEventListener('dragleave', () => dzB.classList.remove('drag-over'));
+dzB.addEventListener('drop', e => { e.preventDefault(); dzB.classList.remove('drag-over'); loadBatchFiles(e.dataTransfer.files); });
+fiB.addEventListener('change', () => loadBatchFiles(fiB.files));
+
+function createResultRow(file, idx) {
+  const row = document.createElement('div');
+  row.className = 'result-row processing';
+  row.id = `row-${idx}`;
+  row.innerHTML = `
+    <span class="result-name" title="${file.name}">${file.name}</span>
+    <span class="result-orig">${fmtBytes(file.size)}</span>
+    <span class="result-comp" id="rc-${idx}">—</span>
+    <span class="result-ratio pending" id="rr-${idx}">...</span>`;
+  return row;
+}
+
+function updateResultRow(idx, compBytes, origBytes, dataURL, fmt) {
+  const row = document.getElementById(`row-${idx}`);
+  if (!row) return;
+  row.classList.remove('processing');
+  row.classList.add('done');
+  const ratio = ((1-compBytes/origBytes)*100).toFixed(1);
+  document.getElementById(`rc-${idx}`).textContent = fmtBytes(compBytes);
+  const rr = document.getElementById(`rr-${idx}`);
+  if (compBytes < origBytes) {
+    rr.textContent = `−${ratio}%`; rr.className = 'result-ratio down';
+  } else {
+    rr.textContent = `+${Math.abs(ratio)}%`; rr.className = 'result-ratio up';
+  }
+}
+
+compBtnB.addEventListener('click', async () => {
+  if (!batchFiles.length) return;
+  compBtnB.disabled = true; spinnerB.classList.add('visible');
+  compTextB.textContent = '처리 중...';
+  dlAllBar.classList.remove('visible');
+  batchResults = [];
+
+  // Build result rows
+  resultList.innerHTML = '';
+  batchFiles.forEach((f,i) => resultList.appendChild(createResultRow(f,i)));
+  resultListWrap.classList.add('visible');
+  resultCountLabel.textContent = `결과 (0 / ${batchFiles.length})`;
+  progressWrap.classList.add('visible');
+  progressFill.style.width = '0%';
+
+  const quality = parseInt(qualSliderB.value);
+  const maxW = parseInt(maxWB.value);
+  let done = 0;
+
+  for (let i = 0; i < batchFiles.length; i++) {
+    const file = batchFiles[i];
+    progressText.textContent = `처리 중: ${file.name}`;
+    try {
+      const dataURL = await compressImage(file, batchFmt, quality, maxW);
+      const cb = dataURLBytes(dataURL);
+      batchResults.push({ file, dataURL, compBytes: cb, origBytes: file.size, fmt: batchFmt });
+      updateResultRow(i, cb, file.size, dataURL, batchFmt);
+    } catch(e) {
+      batchResults.push({ file, error: true });
+      const row = document.getElementById(`row-${i}`);
+      if (row) { row.classList.remove('processing'); document.getElementById(`rr-${i}`).textContent = '오류'; }
+    }
+    done++;
+    const pct = Math.round(done/batchFiles.length*100);
+    progressFill.style.width = pct + '%';
+    progressPct.textContent = pct + '%';
+    resultCountLabel.textContent = `결과 (${done} / ${batchFiles.length})`;
+    // yield to browser
+    if (i % 5 === 4) await new Promise(r => setTimeout(r, 0));
+  }
+
+  progressText.textContent = '완료!';
+  spinnerB.classList.remove('visible');
+  compBtnB.disabled = false;
+  compTextB.textContent = '다시 압축';
+
+  const saved = batchResults.reduce((s,r) => s + (!r.error ? Math.max(0, r.origBytes - r.compBytes) : 0), 0);
+  const totalOrig = batchResults.reduce((s,r) => s + r.origBytes, 0);
+  const savedPct = totalOrig > 0 ? ((saved/totalOrig)*100).toFixed(1) : '0';
+  totalSaved.innerHTML = `전체 절감: <strong>${fmtBytes(saved)}</strong> (${savedPct}%)`;
+  dlAllBar.classList.add('visible');
+});
+
+dlAllBtn.addEventListener('click', async () => {
+  if (!batchResults.length) return;
+  dlAllBtn.disabled = true; spinnerZip.classList.add('visible'); dlAllText.textContent = 'ZIP 생성 중...';
+  try {
+    const zip = new JSZip();
+    const ext = fmtExt[batchFmt];
+    batchResults.forEach(r => {
+      if (r.error) return;
+      const baseName = r.file.name.replace(/\.[^.]+$/,'');
+      zip.file(`${baseName}_compressed.${ext}`, dataURLtoBlob(r.dataURL));
+    });
+    const blob = await zip.generateAsync({ type:'blob', compression:'STORE' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'compressed_images.zip';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } finally {
+    dlAllBtn.disabled = false; spinnerZip.classList.remove('visible'); dlAllText.textContent = '전체 ZIP 다운로드';
+  }
+});
+
+function resetBatch() {
+  batchFiles = []; batchResults = []; fiB.value = '';
+  summaryB.classList.remove('visible');
+  ctrlB.classList.remove('visible');
+  abB.classList.remove('visible');
+  progressWrap.classList.remove('visible');
+  resultListWrap.classList.remove('visible');
+  dlAllBar.classList.remove('visible');
+  resultList.innerHTML = '';
+  qualSliderB.value=75; qualValB.textContent='75';
+  maxWB.value=4000; maxWValB.textContent='원본';
+  document.querySelectorAll('#fmtBatch .fmt-btn').forEach((b,i)=>b.classList.toggle('active',i===0));
+  batchFmt='image/jpeg'; compTextB.textContent='일괄 압축 시작';
+}
+document.getElementById('resetBtnB').addEventListener('click', resetBatch);
+document.getElementById('resetBtnB2').addEventListener('click', resetBatch);
+</script>
+</body>
+</html>
